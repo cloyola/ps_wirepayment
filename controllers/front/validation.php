@@ -58,6 +58,8 @@ class Ps_WirepaymentValidationModuleFrontController extends ModuleFrontControlle
 		$mailVars = array(
 			'{bankwire_owner}' => Configuration::get('BANK_WIRE_OWNER'),
 			'{bankwire_details}' => nl2br(Configuration::get('BANK_WIRE_DETAILS')),
+			'{bankwire_account}' => nl2br(Configuration::get('BANK_WIRE_ACCOUNT')),
+			'{bankwire_account_ext}' => nl2br(Configuration::get('BANK_WIRE_ACCOUNT_EXT')),
 			'{bankwire_address}' => nl2br(Configuration::get('BANK_WIRE_ADDRESS'))
 		);
 
