@@ -44,11 +44,14 @@ class Ps_WirepaymentPaymentModuleFrontController extends ModuleFrontController
 
 		$total = sprintf(
 			$this->getTranslator()->trans('%1$s (tax incl.)', array(), 'Modules.Wirepayment.Shop'),
-			Tools::displayPrice($cart->getOrderTotal(true, Cart::BOTH))
+			$this->context->getCurrentLocale()->formatPrice(
+				$cart->getOrderTotal(true, Cart::BOTH),
+				$this->context->currency->iso_code
+			)
 		);
 
 		$this->context->smarty->assign(array(
-      'back_url' => $this->context->link->getPageLink('order', true, NULL, "step=3"),
+      'back_url' => $this->context->link->getPageLink('order', true, null, 'step=3'),
 			'confirm_url' => $this->context->link->getModuleLink('ps_wirepayment', 'validation', [], true),
 			'image_url' => $this->module->getPathUri() . 'ps_wirepayment.jpg',
 			'cust_currency' => $cart->id_currency,

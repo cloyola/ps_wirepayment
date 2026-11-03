@@ -44,12 +44,18 @@ class Ps_Wirepayment extends PaymentModule
     public $accountext;
     public $extra_mail_vars;
 
+    /** @var int */
+    public $is_eu_compatible;
+
+    /** @var false|int|string */
+    public $reservation_days;
+
     public function __construct()
     {
         $this->name = 'ps_wirepayment';
         $this->tab = 'payments_gateways';
-        $this->version = '2.0.4';
-        $this->ps_versions_compliancy = array('min' => '1.7.1.0', 'max' => _PS_VERSION_);
+        $this->version = '2.1.0';
+        $this->ps_versions_compliancy = array('min' => '8.1.0', 'max' => _PS_VERSION_);
         $this->author = 'PrestaShop';
         $this->controllers = array('payment', 'validation');
         $this->is_eu_compatible = 1;
@@ -90,21 +96,25 @@ class Ps_Wirepayment extends PaymentModule
             $this->warning = $this->trans('No currency has been set for this module.', array(), 'Modules.Wirepayment.Admin');
         }
 
-        $this->extra_mail_vars = array(
-                                        '{bankwire_owner}' => Configuration::get('BANK_WIRE_OWNER'),
-                                        '{bankwire_details}' => nl2br(Configuration::get('BANK_WIRE_DETAILS')),
-                                        '{bankwire_address}' => nl2br(Configuration::get('BANK_WIRE_ADDRESS')),
-                                        '{bankwire_account}' => Configuration::get('BANK_WIRE_ACCOUNT'),
-                                        '{bankwire_account_ext}' => Configuration::get('BANK_WIRE_ACCOUNT_EXT'),
-                                        );
+        $this->extra_mail_vars = $this->getMailVars();
+
+        if ($this->id) {
+            $this->migratePaymentReturnHook();
+        }
     }
 
     public function install()
     {
         Configuration::updateValue(self::FLAG_DISPLAY_PAYMENT_INVITE, true);
-        if (!parent::install() || !$this->registerHook('paymentReturn') || !$this->registerHook('paymentOptions')) {
+        if (!parent::install()
+            || !$this->registerHook('displayPaymentReturn')
+            || !$this->registerHook('paymentOptions')
+        ) {
             return false;
         }
+
+        Configuration::updateValue('PS_WIREPAYMENT_HOOK_MIGRATED', 1);
+
         return true;
     }
 
@@ -123,6 +133,7 @@ class Ps_Wirepayment extends PaymentModule
                 || !Configuration::deleteByName('BANK_WIRE_ACCOUNT')
                 || !Configuration::deleteByName('BANK_WIRE_ACCOUNT_EXT')
                 || !Configuration::deleteByName('BANK_WIRE_RESERVATION_DAYS')
+                || !Configuration::deleteByName('PS_WIREPAYMENT_HOOK_MIGRATED')
                 || !Configuration::deleteByName(self::FLAG_DISPLAY_PAYMENT_INVITE)
                 || !parent::uninstall()) {
             return false;
@@ -199,11 +210,11 @@ class Ps_Wirepayment extends PaymentModule
     public function hookPaymentOptions($params)
     {
         if (!$this->active) {
-            return;
+            return array();
         }
 
         if (!$this->checkCurrency($params['cart'])) {
-            return;
+            return array();
         }
 
         $this->smarty->assign(
@@ -224,18 +235,23 @@ class Ps_Wirepayment extends PaymentModule
 
     public function hookPaymentReturn($params)
     {
+        return $this->hookDisplayPaymentReturn($params);
+    }
+
+    public function hookDisplayPaymentReturn($params)
+    {
         if (!$this->active || !Configuration::get(self::FLAG_DISPLAY_PAYMENT_INVITE)) {
-            return;
+            return '';
         }
 
-        $state = $params['order']->getCurrentState();
+        $state = (int) $params['order']->getCurrentState();
         if (
             in_array(
                 $state,
                 array(
-                    Configuration::get('PS_OS_BANKWIRE'),
-                    Configuration::get('PS_OS_OUTOFSTOCK'),
-                    Configuration::get('PS_OS_OUTOFSTOCK_UNPAID'),
+                    (int) Configuration::get('PS_OS_BANKWIRE'),
+                    (int) Configuration::get('PS_OS_OUTOFSTOCK'),
+                    (int) Configuration::get('PS_OS_OUTOFSTOCK_UNPAID'),
                 )
         )) {
             $bankwireOwner = $this->owner;
@@ -243,33 +259,32 @@ class Ps_Wirepayment extends PaymentModule
                 $bankwireOwner = '___________';
             }
 
-            $bankwireDetails = Tools::nl2br($this->details);
+            $bankwireDetails = $this->multilineValue($this->details);
             if (!$bankwireDetails) {
                 $bankwireDetails = '___________';
             }
 
-            $bankwireAddress = Tools::nl2br($this->address);
+            $bankwireAddress = $this->multilineValue($this->address);
             if (!$bankwireAddress) {
                 $bankwireAddress = '___________';
             }
 
-            $bankwireAccount = $this->account;
+            $bankwireAccount = $this->multilineValue($this->account);
             if (!$bankwireAccount) {
                 $bankwireAccount = '___________';
             }
 
-            $bankwireAccountExt = $this->accountext;
+            $bankwireAccountExt = $this->multilineValue($this->accountext);
             if (!$bankwireAccountExt) {
                 $bankwireAccountExt = '___________';
             }
 
+            $orderCurrency = new Currency((int) $params['order']->id_currency);
+            $totalToPay = $params['order']->getOrdersTotalPaid() - $params['order']->getTotalPaid();
+
             $this->smarty->assign(array(
                 'shop_name' => $this->context->shop->name,
-                'total' => Tools::displayPrice(
-                    $params['order']->getOrdersTotalPaid(),
-                    new Currency($params['order']->id_currency),
-                    false
-                ),
+                'total' => $this->formatPrice($totalToPay, $orderCurrency),
                 'bankwireDetails' => $bankwireDetails,
                 'bankwireAddress' => $bankwireAddress,
                 'bankwireOwner' => $bankwireOwner,
@@ -449,7 +464,7 @@ class Ps_Wirepayment extends PaymentModule
         $cart = $this->context->cart;
         $total = sprintf(
             $this->trans('%1$s (tax incl.)', array(), 'Modules.Wirepayment.Shop'),
-            Tools::displayPrice($cart->getOrderTotal(true, Cart::BOTH))
+            $this->formatPrice($cart->getOrderTotal(true, Cart::BOTH), $this->context->currency)
         );
 
         $bankwireOwner = $this->owner;
@@ -457,22 +472,22 @@ class Ps_Wirepayment extends PaymentModule
             $bankwireOwner = '___________';
         }
 
-        $bankwireDetails = Tools::nl2br($this->details);
+        $bankwireDetails = $this->multilineValue($this->details);
         if (!$bankwireDetails) {
             $bankwireDetails = '___________';
         }
 
-        $bankwireAddress = Tools::nl2br($this->address);
+        $bankwireAddress = $this->multilineValue($this->address);
         if (!$bankwireAddress) {
             $bankwireAddress = '___________';
         }
 
-        $bankwireAccount = $this->account;
+        $bankwireAccount = $this->multilineValue($this->account);
         if (!$bankwireAccount) {
             $bankwireAccount = '___________';
         }
 
-        $bankwireAccountExt = Configuration::get('BANK_WIRE_ACCOUNT_EXT');
+        $bankwireAccountExt = $this->multilineValue($this->accountext);
         if (!$bankwireAccountExt) {
             $bankwireAccountExt = '___________';
         }
@@ -482,10 +497,9 @@ class Ps_Wirepayment extends PaymentModule
             $bankwireReservationDays = 7;
         }
 
-        $bankwireCustomText = Tools::nl2br(Configuration::get('BANK_WIRE_CUSTOM_TEXT', $this->context->language->id));
-        if (false === $bankwireCustomText) {
-            $bankwireCustomText = '';
-        }
+        $bankwireCustomText = $this->multilineValue(
+            Configuration::get('BANK_WIRE_CUSTOM_TEXT', $this->context->language->id)
+        );
 
         return array(
             'total' => $total,
@@ -497,5 +511,106 @@ class Ps_Wirepayment extends PaymentModule
             'bankwireReservationDays' => (int)$bankwireReservationDays,
             'bankwireCustomText' => $bankwireCustomText,
         );
+    }
+
+    /**
+     * Variables injected into the order and bank-wire emails.
+     *
+     * @return array<string, string>
+     */
+    public function getMailVars()
+    {
+        return array(
+            '{bankwire_owner}' => (string) Configuration::get('BANK_WIRE_OWNER'),
+            '{bankwire_details}' => $this->multilineValue(Configuration::get('BANK_WIRE_DETAILS')),
+            '{bankwire_address}' => $this->multilineValue(Configuration::get('BANK_WIRE_ADDRESS')),
+            '{bankwire_account}' => $this->multilineValue(Configuration::get('BANK_WIRE_ACCOUNT')),
+            '{bankwire_account_ext}' => $this->multilineValue(Configuration::get('BANK_WIRE_ACCOUNT_EXT')),
+        );
+    }
+
+    /**
+     * PrestaShop 9.2 reads Mail::TYPE_BOTH_AUTOMATIC_TEXT while building the
+     * order confirmation. If classes/Mail.php does not define it, validateOrder()
+     * fatals after the payment. This keeps the core rendering rules without
+     * evaluating a missing constant.
+     *
+     * @param string $template_name
+     * @param int $mail_type
+     * @param array $var
+     *
+     * @return string
+     */
+    protected function getEmailTemplateContent($template_name, $mail_type, $var)
+    {
+        $configuration = Configuration::get('PS_MAIL_TYPE');
+        $textTypes = array(Mail::TYPE_TEXT, Mail::TYPE_BOTH);
+        $htmlTypes = array(Mail::TYPE_HTML, Mail::TYPE_BOTH);
+
+        if (defined('Mail::TYPE_BOTH_AUTOMATIC_TEXT')) {
+            $htmlTypes[] = constant('Mail::TYPE_BOTH_AUTOMATIC_TEXT');
+        } else {
+            $htmlTypes[] = 4;
+        }
+
+        if ($mail_type === Mail::TYPE_TEXT && !in_array($configuration, $textTypes)) {
+            return '';
+        }
+
+        if ($mail_type === Mail::TYPE_HTML && !in_array($configuration, $htmlTypes)) {
+            return '';
+        }
+
+        return $this->getPartialRenderer()->render($template_name, $this->context->language, $var);
+    }
+
+    /**
+     * @param float|int|string $price
+     * @param Currency|null $currency
+     *
+     * @return string
+     */
+    protected function formatPrice($price, $currency = null)
+    {
+        if (!$currency instanceof Currency || empty($currency->iso_code)) {
+            $currency = $this->context->currency;
+        }
+
+        return $this->context->getCurrentLocale()->formatPrice((float) $price, $currency->iso_code);
+    }
+
+    /**
+     * @param mixed $value
+     *
+     * @return string
+     */
+    protected function multilineValue($value)
+    {
+        if (!is_string($value) || $value === '') {
+            return '';
+        }
+
+        return nl2br($value);
+    }
+
+    /**
+     * paymentReturn is only an alias in PrestaShop 9 and raises a deprecation
+     * on PHP 8.4 when the shop runs with deprecations enabled.
+     */
+    protected function migratePaymentReturnHook()
+    {
+        if (Configuration::get('PS_WIREPAYMENT_HOOK_MIGRATED')) {
+            return;
+        }
+
+        if ($this->isRegisteredInHook('paymentReturn') && !$this->unregisterHook('paymentReturn')) {
+            return;
+        }
+
+        if (!$this->isRegisteredInHook('displayPaymentReturn') && !$this->registerHook('displayPaymentReturn')) {
+            return;
+        }
+
+        Configuration::updateValue('PS_WIREPAYMENT_HOOK_MIGRATED', 1);
     }
 }

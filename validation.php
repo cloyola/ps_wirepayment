@@ -56,9 +56,19 @@ if (!Validate::isLoadedObject($customer))
 	Tools::redirect('index.php?controller=order&step=1');
 
 $currency = $context->currency;
-$total = (float)($cart->getOrderTotal(true, Cart::BOTH));
+$total = (float) $cart->getOrderTotal(true, Cart::BOTH);
 
-$bankwire->validateOrder($cart->id, Configuration::get('PS_OS_BANKWIRE'), $total, $bankwire->displayName, NULL, array(), (int)$currency->id, false, $customer->secure_key);
+$bankwire->validateOrder(
+	(int) $cart->id,
+	(int) Configuration::get('PS_OS_BANKWIRE'),
+	$total,
+	$bankwire->displayName,
+	null,
+	$bankwire->getMailVars(),
+	(int) $currency->id,
+	false,
+	$customer->secure_key
+);
 
 $order = new Order($bankwire->currentOrder);
 Tools::redirect('index.php?controller=order-confirmation&id_cart='.$cart->id.'&id_module='.$bankwire->id.'&id_order='.$bankwire->currentOrder.'&key='.$customer->secure_key);

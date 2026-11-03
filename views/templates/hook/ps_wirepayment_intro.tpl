@@ -28,7 +28,7 @@
     {l s='Please transfer the invoice amount to our bank account. You will receive our order confirmation by email containing bank details and order number.' d='Modules.Wirepayment.Shop'}
     {l s='Goods will be reserved %s days for you and we\'ll process the order immediately after receiving the payment.' sprintf=[$bankwireReservationDays] d='Modules.Wirepayment.Shop'}
     {if $bankwireCustomText }
-        <a data-toggle="modal" data-target="#bankwire-modal">{l s='More information' d='Modules.Wirepayment.Shop'}</a>
+        <a href="#bankwire-modal" data-toggle="modal" data-bs-toggle="modal" data-target="#bankwire-modal" data-bs-target="#bankwire-modal">{l s='More information' d='Modules.Wirepayment.Shop'}</a>
     {/if}
   </p>
 
@@ -36,7 +36,7 @@
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-header">
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <button type="button" class="close" data-dismiss="modal" data-bs-dismiss="modal" aria-label="Close">
             <span aria-hidden="true">&times;</span>
           </button>
           <h2>{l s='Bankwire' d='Modules.Wirepayment.Shop'}</h2>

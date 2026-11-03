@@ -33,4 +33,8 @@
     <dd>{$bankwireDetails nofilter}</dd>
     <dt>{l s='Bank name' d='Modules.Wirepayment.Shop'}</dt>
     <dd>{$bankwireAddress nofilter}</dd>
+    <dt>{l s='Bank account' d='Modules.Wirepayment.Shop'}</dt>
+    <dd>{$bankwireAccount nofilter}</dd>
+    <dt>{l s='External account' d='Modules.Wirepayment.Shop'}</dt>
+    <dd>{$bankwireAccountExt nofilter}</dd>
 </dl>
